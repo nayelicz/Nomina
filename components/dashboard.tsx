@@ -28,7 +28,8 @@ import { NomillarLogo } from "@/components/nomillar-logo"
 // New modular components
 import { SmartCsvImporter } from "@/components/dashboard/SmartCsvImporter"
 import { EmployeeView } from "@/components/dashboard/EmployeeView"
-import { AuditExplorer } from "@/components/dashboard/AuditExplorer"
+import { AuditExplorer, type OnChainTx } from "@/components/dashboard/AuditExplorer"
+import type { DispersionResult } from "@/lib/payroll-csv"
 
 export function Dashboard({ role, onLogout }: DashboardProps) {
   const { notifyWIP } = useUIFeedback()
@@ -41,22 +42,71 @@ export function Dashboard({ role, onLogout }: DashboardProps) {
 
   const isAdmin = role === "admin"
 
-  const handleDisperseFunds = async () => {
+  const [onChainTxs, setOnChainTxs] = useState<OnChainTx[]>([])
+
+  /**
+   * Envía el lote al dispersor Alebrije vía /api/dispersar (proxy → DISPERSOR_API_URL).
+   * El dispersor ancla el commitment del lote en Stellar testnet y devuelve el hash de la tx.
+   */
+  const handleDisperseFunds = async (csv: string) => {
+    if (isDispersing) return
     setIsDispersing(true)
-    const toastId = toast.loading("Iniciando dispersión y validación...", { description: "Conectando con la infraestructura..." })
-    
-    // Simulate real dispersion
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        toast.success("Dispersión Completada", {
-          id: toastId,
-          description: "Los fondos han sido transferidos exitosamente. Consulta el Explorador de Auditoría para más detalles.",
-          duration: 5000,
-        })
-        setIsDispersing(false)
-        resolve()
-      }, 3000)
+    const toastId = toast.loading("Iniciando dispersión...", {
+      description: "Enviando lote al dispersor Alebrije (Stellar testnet)...",
     })
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 120000)
+
+    try {
+      const res = await fetch("/api/dispersar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv }),
+        signal: controller.signal,
+      })
+      const data = (await res.json().catch(() => ({}))) as DispersionResult
+      if (!res.ok) throw new Error(data.error || `El dispersor respondió ${res.status}`)
+
+      const txHash = data.txHash || data.hash || ""
+      const explorerUrl =
+        data.txExplorerUrl || (txHash ? `https://stellar.expert/explorer/testnet/tx/${txHash}` : undefined)
+
+      setOnChainTxs((prev) => [
+        {
+          id: data.batchId || txHash || String(Date.now()),
+          date: new Date().toLocaleString("es-MX"),
+          txHash,
+          explorerUrl,
+          count: data.count,
+          total: data.total,
+          asset: data.asset,
+        },
+        ...prev,
+      ])
+
+      toast.success("Nómina dispersada y registrada en Stellar", {
+        id: toastId,
+        description: `${txHash ? `Tx ${txHash.slice(0, 8)}…${txHash.slice(-8)} · ` : ""}Empleados: ${data.count ?? "—"} · Total: ${data.total ?? "—"} ${data.asset ?? ""}`,
+        action: explorerUrl
+          ? { label: "Ver en Stellar", onClick: () => window.open(explorerUrl, "_blank", "noopener,noreferrer") }
+          : undefined,
+        duration: 12000,
+      })
+    } catch (error) {
+      const err = error as Error
+      let errorMsg = err?.message || "Ocurrió un error inesperado al procesar la dispersión."
+      if (err?.name === "AbortError") {
+        errorMsg = "Tiempo agotado. El dispersor tardó demasiado en responder."
+      } else if (errorMsg === "Failed to fetch" || errorMsg.includes("Load failed")) {
+        errorMsg = "No se pudo contactar al servidor. Revisa tu conexión."
+      }
+      toast.error("Error al dispersar fondos", { id: toastId, description: errorMsg, duration: 9000 })
+      throw error
+    } finally {
+      clearTimeout(timeoutId)
+      setIsDispersing(false)
+    }
   }
 
   useEffect(() => {
@@ -212,7 +262,7 @@ export function Dashboard({ role, onLogout }: DashboardProps) {
             {isLoading ? (
               <div className="h-64 rounded-2xl bg-card border border-border animate-pulse" />
             ) : (
-              <AuditExplorer />
+              <AuditExplorer onChainTxs={onChainTxs} />
             )}
           </div>
           
