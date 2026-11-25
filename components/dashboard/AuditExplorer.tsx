@@ -4,8 +4,26 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { Search, Filter, Download, Hash, ArrowRightLeft, ExternalLink, ShieldCheck } from "lucide-react"
 
-export function AuditExplorer() {
-  const transactions = [
+export interface OnChainTx {
+  id: string
+  date: string
+  txHash: string
+  explorerUrl?: string
+  count?: number
+  total?: number | string
+  asset?: string
+}
+
+interface AuditExplorerProps {
+  /** Lotes realmente registrados en Stellar durante esta sesión. */
+  onChainTxs?: OnChainTx[]
+}
+
+const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet"
+
+export function AuditExplorer({ onChainTxs = [] }: AuditExplorerProps) {
+  // Filas de ejemplo (no están en la blockchain); se muestran después de las reales.
+  const demoTransactions = [
     { id: "1", date: "2026-05-15 14:32:01", from: "Fideicomiso Rappi MX", to: "Liquidación Repartidores Z-14", amount: "$1,124,500.00", hash: "TRX-88912-BNT", status: "Confirmado" },
     { id: "2", date: "2026-05-15 14:32:01", from: "Cuenta Operativa Kavak", to: "Comisiones Compra-Venta Q1", amount: "$585,320.00", hash: "TRX-88913-BNT", status: "Confirmado" },
     { id: "3", date: "2026-05-15 14:32:02", from: "Alsea Corp. Bóveda", to: "Propinas Starbucks Polanco", amount: "$45,100.00", hash: "TRX-88914-BNT", status: "Confirmado" },
@@ -14,6 +32,23 @@ export function AuditExplorer() {
   ]
 
   const [searchTerm, setSearchTerm] = useState("")
+
+  const realRows = onChainTxs.map((tx) => ({
+    id: tx.id,
+    date: tx.date,
+    from: "Bóveda Nomillar",
+    to: `Lote de nómina · ${tx.count ?? "—"} empleados`,
+    amount: `${tx.total ?? "—"} ${tx.asset ?? ""}`.trim(),
+    hash: tx.txHash ? `${tx.txHash.slice(0, 8)}…${tx.txHash.slice(-6)}` : "—",
+    status: "En Stellar",
+    url: tx.explorerUrl,
+    real: true,
+  }))
+  const demoRows = demoTransactions.map((tx) => ({ ...tx, status: "Ejemplo", url: undefined as string | undefined, real: false }))
+  const term = searchTerm.trim().toLowerCase()
+  const transactions = [...realRows, ...demoRows].filter(
+    (tx) => !term || [tx.hash, tx.date, tx.from, tx.to].some((v) => v.toLowerCase().includes(term))
+  )
 
   return (
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -86,14 +121,26 @@ export function AuditExplorer() {
                 </td>
                 <td className="px-6 py-4 text-right font-medium">{tx.amount}</td>
                 <td className="px-6 py-4 text-center">
-                  <span className="inline-flex items-center px-2 py-1 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs">
+                  <span
+                    className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
+                      tx.real
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
                     {tx.status}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-center">
-                  <button className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors inline-flex">
+                  <a
+                    href={tx.url ?? STELLAR_EXPERT_TESTNET}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={tx.url ? "Ver transacción en Stellar Expert" : "Abrir Stellar Expert (testnet)"}
+                    className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors inline-flex"
+                  >
                     <ExternalLink className="w-4 h-4" />
-                  </button>
+                  </a>
                 </td>
               </motion.tr>
             ))}
@@ -103,7 +150,7 @@ export function AuditExplorer() {
 
       {/* Pagination Mock */}
       <div className="p-4 border-t border-border bg-muted/20 flex items-center justify-between text-sm text-muted-foreground">
-        <div>Mostrando 1 - 5 de 342 registros</div>
+        <div>Mostrando {transactions.length} registro(s) · {realRows.length} en Stellar</div>
         <div className="flex gap-1">
           <button className="px-3 py-1 rounded border border-border bg-secondary opacity-50 cursor-not-allowed">Anterior</button>
           <button className="px-3 py-1 rounded border border-border bg-background hover:bg-secondary">Siguiente</button>
